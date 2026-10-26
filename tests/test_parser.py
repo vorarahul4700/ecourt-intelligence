@@ -1,8 +1,7 @@
-"""
-Unit tests for the eCourts HTML parser.
-"""
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import pytest
 from ecourt.parser import parse_case_html
 
 SAMPLE_HTML = """
@@ -109,3 +108,8 @@ def test_parse_case_html():
     assert data["ia_status"][0]["ia_number"] == "IA/1/2026"
     assert len(data["case_history"]) == 1
     assert data["case_history"][0]["business_on_date"] == "26-10-2026"
+
+
+if __name__ == "__main__":
+    test_parse_case_html()
+    print("All parser unit tests passed successfully!")

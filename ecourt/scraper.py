@@ -28,11 +28,6 @@ from .captcha import get_shared_solver, CaptchaSolver
 from .parser import parse_case_html
 from .models import ECourtCaseResult, CaseDetails, CaseStatus, Party, Act, ProcessRecord, IAStatus, HearingHistory
 
-# In-memory cache for dynamic delimiter headers to save 500-800ms per request
-_CACHED_CUSTOM_HEADERS: Optional[Dict[str, str]] = None
-_CACHE_TIMESTAMP: float = 0
-_CACHE_TTL: float = 3600  # 1 hour
-
 
 class ECourtScraper:
     """
@@ -58,23 +53,19 @@ class ECourtScraper:
         # Use pre-warmed singleton OCR solver (~30ms)
         self.solver = solver or get_shared_solver()
 
-        # State tracked across requests
+        # State tracked across requests for this session
         self.hidden_inputs: Dict[str, Dict[str, str]] = {}
         self.app_token: str = ""
         self.custom_headers: Dict[str, str] = {}
         self.captcha_src: str = ""
         self.components_js_url: str = ""
 
-    def get_dynamic_headers(self, soup: Optional[BeautifulSoup] = None, raw_html: str = "") -> Dict[str, str]:
+    def get_dynamic_headers(self, raw_html: str = "") -> Dict[str, str]:
         """
-        Retrieves security delimiter headers. Reuses cached headers across requests
-        to eliminate a redundant 65KB JS network round-trip (~600ms saved).
+        Retrieves security delimiter headers for the current session.
+        Headers are bound to the current session cookies.
         """
-        global _CACHED_CUSTOM_HEADERS, _CACHE_TIMESTAMP
-        now = time.time()
-
-        if _CACHED_CUSTOM_HEADERS and (now - _CACHE_TIMESTAMP < _CACHE_TTL):
-            self.custom_headers = _CACHED_CUSTOM_HEADERS
+        if self.custom_headers:
             return self.custom_headers
 
         # Find components.js script tag
@@ -89,27 +80,25 @@ class ECourtScraper:
             resp = self.session.get(self.components_js_url, timeout=self.timeout)
             js_text = resp.text
 
-            delimeter_match = re.search(r'var\s+delimeter\s*=\s*["\']([^"\']+)["\']', js_text)
-            delimeter = delimeter_match.group(1) if delimeter_match else "adg878r"
+            delimeter_match = re.search(r'delimeter\s*=\s*["\']([^"\']+)["\']', js_text)
+            delimeter = delimeter_match.group(1) if delimeter_match else "bzmvnbgf456"
 
             headers_block = re.search(r'headers\s*:\s*\{([^}]+)\}', js_text)
             custom_headers: Dict[str, str] = {"delimeter": delimeter}
 
             if headers_block:
                 pairs = re.findall(
-                    r'["\']([^"\']+)["\']\s*:\s*(?:delimeter|["\']([^"\']+)["\'])',
+                    r'["\']([^"\']+)["\']\s*:\s*([^,\r\n}]+)',
                     headers_block.group(1),
                 )
                 for k, v in pairs:
-                    custom_headers[k] = v if v else delimeter
+                    v = v.strip()
+                    custom_headers[k] = delimeter if "delimeter" in v else v.strip('"\'')
 
-            _CACHED_CUSTOM_HEADERS = custom_headers
-            _CACHE_TIMESTAMP = now
             self.custom_headers = custom_headers
             return custom_headers
 
         except Exception:
-            # Fallback to standard active defaults if network fetch fails
             fallback = {"delimeter": "bzmvnbgf456", "Suiyrty45": "bzmvnbgf456"}
             self.custom_headers = fallback
             return fallback
@@ -118,6 +107,7 @@ class ECourtScraper:
         """
         Initializes portal session with ultra-fast regex extraction (<1ms).
         """
+        self.custom_headers = {}
         target_url = initial_url or f"{self.base_url}{HOME_PATH}"
         resp = self.session.get(target_url, timeout=self.timeout)
         if resp.status_code != 200:
@@ -142,7 +132,7 @@ class ECourtScraper:
         raw_src = captcha_match.group(1)
         self.captcha_src = urllib.parse.urljoin(f"{self.base_url}/ecourtindia_v6/", raw_src)
 
-        # 3. Get cached or extracted security headers
+        # 3. Get session-specific security headers
         self.get_dynamic_headers(raw_html=html)
 
         return {
@@ -154,9 +144,11 @@ class ECourtScraper:
         }
 
     def fetch_captcha_bytes(self, captcha_url: str) -> bytes:
-        """Downloads captcha image bytes over persistent HTTP keep-alive connection."""
+        """Downloads captcha image bytes with cache-busting headers."""
         headers = self.session.headers.copy()
         headers["Referer"] = f"{self.base_url}{HOME_PATH}&app_token={self.app_token}"
+        headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        headers["Pragma"] = "no-cache"
         resp = self.session.get(captcha_url, headers=headers, timeout=self.timeout)
         if resp.status_code != 200:
             raise ConnectionError(f"Failed to download captcha image: HTTP {resp.status_code}")
@@ -169,6 +161,41 @@ class ECourtScraper:
             self.captcha_src = urllib.parse.urljoin(f"{self.base_url}/ecourtindia_v6/", match.group(1))
             return self.captcha_src
         return None
+
+    def refresh_captcha(self) -> str:
+        """
+        Actively forces the eCourts server to generate a new captcha code and token.
+        Uses eCourts casestatus/getCaptcha API with fallback to cache-buster parameter.
+        """
+        import random
+        try:
+            ajax_headers = {
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "X-Requested-With": "XMLHttpRequest",
+                "Origin": self.base_url,
+                "Referer": f"{self.base_url}{HOME_PATH}&app_token={self.app_token}",
+            }
+            ajax_headers.update(self.custom_headers)
+            resp = self.session.post(
+                f"{self.base_url}/ecourtindia_v6/?p=casestatus/getCaptcha",
+                headers=ajax_headers,
+                data={"ajax_req": "true", "app_token": self.app_token},
+                timeout=self.timeout,
+            )
+            if resp.status_code == 200:
+                d = resp.json()
+                if d.get("app_token"):
+                    self.app_token = d["app_token"]
+                if d.get("div_captcha"):
+                    new_src = self.update_captcha_from_html(d["div_captcha"])
+                    if new_src:
+                        return new_src
+        except Exception:
+            pass
+
+        rnd = f"{random.random():.16f}"
+        self.captcha_src = f"{self.base_url}/ecourtindia_v6/vendor/securimage/securimage_show.php?{rnd}"
+        return self.captcha_src
 
     def search_case(
         self,
@@ -204,6 +231,8 @@ class ECourtScraper:
 
         search_endpoint = f"{self.base_url}{SEARCH_AJAX_PATH}"
 
+        last_bytes_hash: Optional[int] = None
+
         for attempt in range(1, max_retries + 1):
             if progress_callback:
                 progress_callback("captcha_fetch", f"Decoding captcha (Attempt {attempt})...")
@@ -212,6 +241,17 @@ class ECourtScraper:
 
             # 1. Download captcha over pooled connection
             captcha_bytes = self.fetch_captcha_bytes(self.captcha_src)
+            curr_hash = hash(captcha_bytes)
+
+            # Prevent duplicate/stale captcha submission
+            if curr_hash == last_bytes_hash:
+                if verbose:
+                    print(f"[eCourts] Duplicate captcha detected on attempt {attempt}. Forcing server refresh...")
+                self.refresh_captcha()
+                captcha_bytes = self.fetch_captcha_bytes(self.captcha_src)
+                curr_hash = hash(captcha_bytes)
+
+            last_bytes_hash = curr_hash
 
             # 2. Fast neural OCR decode (~30ms)
             captcha_code = self.solver.solve(captcha_bytes)
@@ -261,6 +301,9 @@ class ECourtScraper:
             # Success
             if status == 1 and "casetype_list" in data:
                 raw_html = data["casetype_list"]
+                if "Record not found" in raw_html or "does not exist" in raw_html.lower():
+                    raise LookupError(f"Case with CNR '{cino}' does not exist.")
+
                 if progress_callback:
                     progress_callback("parsing_results", "Case found! Compiling report...")
                 elif verbose:
@@ -291,9 +334,18 @@ class ECourtScraper:
             if "does not exist" in errormsg or "Record not found" in errormsg:
                 raise LookupError(f"eCourts returned: Case with CNR '{cino}' does not exist.")
 
+            # Invalid session or token rejection recovery
+            if "Invalid Request" in errormsg or "Oops" in errormsg:
+                if verbose:
+                    print(f"[eCourts] Security token expired or rejected. Re-initializing session...")
+                self.initialize_session()
+                continue
+
             # Immediate refresh on captcha mismatch
             if data.get("div_captcha"):
                 self.update_captcha_from_html(data["div_captcha"])
+            else:
+                self.refresh_captcha()
 
             time.sleep(0.05)  # ultra-low latency pause between retries
 

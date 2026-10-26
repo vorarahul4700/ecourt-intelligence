@@ -31,6 +31,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // 2. Search Form Submit
   document.getElementById("searchForm").addEventListener("submit", (e) => {
     e.preventDefault();
+    if (searchBtn.disabled) return;
     const cnr = cnrInput.value.trim().toUpperCase();
     if (cnr.length !== 16) {
       showToast("Please enter a valid 16-character CNR number.", "error");
@@ -44,6 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function startSearch(cnr) {
     if (eventSource) {
       eventSource.close();
+      eventSource = null;
     }
 
     // Reset UI state
@@ -67,22 +69,31 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (payload.type === "complete") {
           markAllDone();
           currentCaseData = payload.data;
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
           setTimeout(() => {
             progressCard.style.display = "none";
             renderCaseResults(payload.data);
             searchBtn.disabled = false;
           }, 300);
-          eventSource.close();
         } else if (payload.type === "not_found") {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
           addStep("error", payload.error || "Case with this CNR does not exist.", "retry");
           showToast(payload.error || "CNR does not exist.", "error");
           searchBtn.disabled = false;
-          eventSource.close();
         } else if (payload.type === "error") {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
           addStep("error", payload.error || "Scraping failed.", "retry");
           showToast(payload.error || "Scraping failed.", "error");
           searchBtn.disabled = false;
-          eventSource.close();
         }
       } catch (err) {
         console.error("SSE parse error:", err);
@@ -91,8 +102,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     eventSource.onerror = (err) => {
       console.warn("SSE error / closed:", err);
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
       searchBtn.disabled = false;
-      if (eventSource) eventSource.close();
     };
   }
 
