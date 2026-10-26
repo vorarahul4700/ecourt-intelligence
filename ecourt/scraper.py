@@ -23,6 +23,7 @@ from .config import (
     DEFAULT_HEADERS,
     DEFAULT_TIMEOUT,
     DEFAULT_MAX_RETRIES,
+    DEFAULT_PROXY,
 )
 from .captcha import get_shared_solver, CaptchaSolver
 from .parser import parse_case_html
@@ -32,6 +33,7 @@ from .models import ECourtCaseResult, CaseDetails, CaseStatus, Party, Act, Proce
 class ECourtScraper:
     """
     High-performance automated scraper for eCourts India Services.
+    Supports routing via Indian residential/datacenter proxies (ECOURT_PROXY).
     """
 
     def __init__(
@@ -39,6 +41,7 @@ class ECourtScraper:
         base_url: str = BASE_URL,
         solver: Optional[CaptchaSolver] = None,
         timeout: int = DEFAULT_TIMEOUT,
+        proxy: Optional[str] = None,
     ):
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
@@ -49,6 +52,14 @@ class ECourtScraper:
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
         self.session.headers.update(DEFAULT_HEADERS)
+
+        # Configure outbound proxy (critical for foreign cloud hosts like Render)
+        self.proxy = proxy or DEFAULT_PROXY
+        if self.proxy:
+            self.session.proxies = {
+                "http": self.proxy,
+                "https": self.proxy,
+            }
 
         # Use pre-warmed singleton OCR solver (~30ms)
         self.solver = solver or get_shared_solver()
@@ -109,7 +120,16 @@ class ECourtScraper:
         """
         self.custom_headers = {}
         target_url = initial_url or f"{self.base_url}{HOME_PATH}"
-        resp = self.session.get(target_url, timeout=self.timeout)
+        try:
+            resp = self.session.get(target_url, timeout=self.timeout)
+        except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as exc:
+            raise ConnectionError(
+                "Connection to eCourts India Gateway (services.ecourts.gov.in) timed out. "
+                "Notice: Indian government servers (*.gov.in) actively drop traffic from foreign cloud datacenters (like Render US/EU). "
+                "To resolve, set the ECOURT_PROXY environment variable on Render to an Indian proxy "
+                "(e.g. http://username:password@indian-proxy-ip:port) or deploy to an Indian cloud region."
+            ) from exc
+
         if resp.status_code != 200:
             raise ConnectionError(f"Failed to access eCourts portal: HTTP {resp.status_code}")
 

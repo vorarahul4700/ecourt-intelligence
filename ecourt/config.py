@@ -1,8 +1,6 @@
-"""
-Configuration constants for the eCourts Scraper.
-"""
+import os
 
-BASE_URL = "https://services.ecourts.gov.in"
+BASE_URL = os.environ.get("ECOURT_BASE_URL", "https://services.ecourts.gov.in")
 HOME_PATH = "/ecourtindia_v6/?p=home/index"
 SEARCH_AJAX_PATH = "/ecourtindia_v6/?p=cnr_status/searchByCNR/"
 
@@ -19,5 +17,7 @@ DEFAULT_HEADERS = {
     "Referer": "https://services.ecourts.gov.in/",
 }
 
-DEFAULT_TIMEOUT = 25  # seconds
+DEFAULT_TIMEOUT = int(os.environ.get("ECOURT_TIMEOUT", "25"))  # seconds
 DEFAULT_MAX_RETRIES = 10
+DEFAULT_PROXY = os.environ.get("ECOURT_PROXY") or os.environ.get("PROXY_URL")
+

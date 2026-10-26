@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import requests
 from ecourt import ECourtScraper
 from ecourt.captcha import get_shared_solver
 
@@ -75,6 +76,15 @@ async def search_case_post(req: SearchRequest):
         return {"success": True, "data": result.model_dump()}
     except LookupError as exc:
         return JSONResponse(status_code=404, content={"success": False, "error": str(exc)})
+    except (ConnectionError, requests.exceptions.RequestException) as exc:
+        err_msg = str(exc)
+        if "timed out" in err_msg.lower() or "connecttimeout" in err_msg.lower():
+            err_msg = (
+                "Connection to eCourts India Gateway timed out. "
+                "Indian government (*.gov.in) servers block traffic from foreign cloud datacenters (like Render US/EU). "
+                "Set the ECOURT_PROXY environment variable in Render Dashboard with an Indian proxy to route requests."
+            )
+        return JSONResponse(status_code=504, content={"success": False, "error": err_msg})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "error": str(exc)})
 
@@ -104,6 +114,15 @@ async def search_case_stream(cnr: str = Query(..., min_length=16, max_length=16)
             await queue.put({"type": "complete", "data": result.model_dump()})
         except LookupError as exc:
             await queue.put({"type": "not_found", "error": str(exc)})
+        except (ConnectionError, requests.exceptions.RequestException) as exc:
+            err_msg = str(exc)
+            if "timed out" in err_msg.lower() or "connecttimeout" in err_msg.lower():
+                err_msg = (
+                    "Connection to eCourts India Gateway timed out. "
+                    "Indian government (*.gov.in) servers block traffic from foreign cloud datacenters (like Render US/EU). "
+                    "Set the ECOURT_PROXY environment variable in Render Dashboard with an Indian proxy to route requests."
+                )
+            await queue.put({"type": "error", "error": err_msg})
         except Exception as exc:
             await queue.put({"type": "error", "error": str(exc)})
 

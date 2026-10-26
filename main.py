@@ -121,7 +121,7 @@ def main() -> None:
         "--cnr",
         "-c",
         type=str,
-        help="16-digit alphanumeric CNR Number (e.g. TSHC070000392026). If omitted, you will be prompted.",
+        help="16-digit alphanumeric CNR Number. If omitted, you will be prompted.",
     )
     parser.add_argument(
         "--format",
@@ -135,6 +135,13 @@ def main() -> None:
         "-o",
         type=str,
         help="Path to save output file (e.g. result.json or result.html).",
+    )
+    parser.add_argument(
+        "--proxy",
+        "-p",
+        type=str,
+        default=None,
+        help="Outbound proxy URL (e.g. http://user:pass@host:port). Can also be set via ECOURT_PROXY.",
     )
     parser.add_argument(
         "--retries",
@@ -157,13 +164,13 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    scraper = ECourtScraper()
+    scraper = ECourtScraper(proxy=args.proxy)
 
     # User-defined CNR input
     cnr = args.cnr
     if not cnr:
         try:
-            cnr = input("Enter 16-digit CNR Number (e.g., TSHC070000392026): ").strip()
+            cnr = input("Enter 16-digit CNR Number: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nOperation cancelled by user.")
             sys.exit(0)

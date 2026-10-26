@@ -104,6 +104,16 @@ This repository is pre-configured for deployment on [Render](https://render.com)
 
 *(Note: `opencv-python-headless` is included in `requirements.txt` to ensure smooth container builds on Render's Debian/Linux images without missing GUI libraries).*
 
+### Important: Indian Gateway Cloud Geo-Blocking
+The Indian National Informatics Centre (NIC) firewalls running on `services.ecourts.gov.in` strictly block or drop traffic coming from foreign cloud datacenters (including Render's US and Frankfurt regions).
+
+If you deploy to Render, you **must route outbound eCourts requests through an Indian proxy** or deploy in an Indian cloud region (AWS Mumbai `ap-south-1`, GCP Mumbai, etc.):
+1. In the **Render Dashboard**, navigate to your Web Service > **Environment**.
+2. Add an environment variable:
+   - **Key**: `ECOURT_PROXY`
+   - **Value**: `http://username:password@indian-proxy-ip:port` *(or `socks5://...`)*
+3. Click **Save Changes**. The service will automatically route all eCourts requests through your Indian proxy.
+
 ---
 
 ## CLI Usage
@@ -113,17 +123,17 @@ This repository is pre-configured for deployment on [Render](https://render.com)
 python main.py
 ```
 ```text
-Enter 16-digit CNR Number: TSHC070000392026
+Enter 16-digit CNR Number: <YOUR_16_DIGIT_CNR>
 ```
 
 ### Direct CNR Search with Terminal Tables
 ```bash
-python main.py --cnr TSHC070000392026 --format table
+python main.py --cnr <YOUR_16_DIGIT_CNR> --format table
 ```
 
 ### Export as JSON
 ```bash
-python main.py --cnr TSHC070000392026 --format json --output result.json
+python main.py --cnr <YOUR_16_DIGIT_CNR> --format json --output result.json
 ```
 
 ---
@@ -134,7 +144,7 @@ python main.py --cnr TSHC070000392026 --format json --output result.json
 from ecourt import ECourtScraper
 
 scraper = ECourtScraper()
-result = scraper.search_case("TSHC070000392026")
+result = scraper.search_case("<YOUR_16_DIGIT_CNR>")
 
 print("Court:", result.court_name)
 print("Filing Number:", result.case_details.filing_number)
@@ -153,5 +163,5 @@ json_output = result.model_dump_json(indent=2)
 ## Running Tests
 
 ```bash
-python -m pytest tests/
+python tests/test_parser.py
 ```
