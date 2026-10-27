@@ -60,18 +60,40 @@ ecourt-scrapper/
 
 ---
 
-## Local Quick Start
+## Running the Web App
 
 ### 1. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Launch Web Dashboard
+### 2. Start the Web Server
+
+Run any of the following commands from the project root:
+
+#### Standard Python Command:
+```bash
+python -m web.app
+```
+
+#### Via Uvicorn (Production mode):
 ```bash
 python -m uvicorn web.app:app --host 0.0.0.0 --port 8080
 ```
-Open [**http://localhost:8080**](http://localhost:8080) in your browser.
+
+#### With Auto-Reload (Development mode):
+```bash
+python -m uvicorn web.app:app --host 0.0.0.0 --port 8080 --reload
+```
+
+#### Custom Port (e.g., Port 8000):
+```bash
+python -m uvicorn web.app:app --host 0.0.0.0 --port 8000
+```
+
+### 3. Open the Dashboard
+Navigate to:
+- [**http://localhost:8080**](http://localhost:8080) or [**http://127.0.0.1:8080**](http://127.0.0.1:8080)
 
 ---
 
